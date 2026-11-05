@@ -31,10 +31,8 @@ const eventsCollection = db.collection('events');
 const usereventsCollection = db.collection('userevents');
 
 
-// --- JWT (assignment challenge: protected APIs) ---------------------------
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'sevaconnect-dev-secret';
 
-// Express middleware: lets the request through only with a valid Bearer JWT.
 function verifyJWT(req, res, next) {
   const header = req.headers?.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
@@ -54,8 +52,6 @@ function verifyJWT(req, res, next) {
 }
 
 
-// Issues a signed JWT for a logged-in user's email (client stores it and
-// sends it as `Authorization: Bearer <token>` on protected calls).
 app.post('/jwt', (req, res) => {
   const email = req.body?.email;
   if (!email) {
@@ -106,7 +102,6 @@ app.get('/all-events', async (req, res) => {
   res.send(events);
 });
 
-// 6 soonest upcoming events (MongoDB sort + .limit(6)) for the homepage.
 app.get('/recent-events', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   const events = await eventsCollection
@@ -139,7 +134,6 @@ app.post('/events/:id/join', verifyJWT, async (req, res) => {
   const email = req.user.email;
   const eventId = new ObjectId(id);
 
-  // One user = one join: reject duplicates before touching the counters.
   const existing = await usereventsCollection.findOne({ eventId, userEmail: email });
   if (existing) {
     return res.status(409).json({ error: 'already-joined' });
@@ -158,7 +152,6 @@ app.delete('/events/:id/join', verifyJWT, async (req, res) => {
 
   const result = await usereventsCollection.deleteOne({ eventId, userEmail: email });
 
-  // Only give the spot back if a join actually existed.
   if (result.deletedCount > 0) {
     await eventsCollection.updateOne({ _id: eventId }, { $inc: { volunteersNeeded: 1 } });
   }
