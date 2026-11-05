@@ -38,7 +38,7 @@ app.post('/create-event', async (req, res) => {
 
 app.get('/events', async (req, res) => {
   const email = req.query.email;
-  const query = email ? {organizerEmail: email} : {};
+  const query = email ? { organizerEmail: email } : {};
   const events = await eventsCollection.find(query).toArray();
   res.send(events);
 });
@@ -51,7 +51,7 @@ app.delete('/events/:id', async (req, res) => {
 
 app.put('/events/:id', async (req, res) => {
   const id = req.params.id;
-  const {_id,...updatedEvent} = req.body;
+  const { _id, ...updatedEvent } = req.body;
   const result = await eventsCollection.updateOne({ _id: new ObjectId(id) }, { $set: updatedEvent });
   res.send(result);
 });
@@ -61,10 +61,65 @@ app.get('/all-events', async (req, res) => {
   res.send(events);
 });
 
-app.get('/event/:id', async (req, res) =>{
-  const id=req.params.id;
-  const event = await eventsCollection.findOne({_id: new ObjectId(id)});
+app.get('/event/:id', async (req, res) => {
+  const id = req.params.id;
+  const event = await eventsCollection.findOne({ _id: new ObjectId(id) });
   res.send(event);
+});
+
+await usereventsCollection.createIndex({ eventId: 1, userEmail: 1 }, { unique: true });
+
+app.get('/events/:id/join', async (req, res) => {
+  const id = req.params.id;
+  const email = req.query.email;
+  const eventId = new ObjectId(id);
+  const joined = await usereventsCollection.findOne({ eventId, userEmail: email });
+  const joinedCount = await usereventsCollection.countDocuments({ eventId });
+  res.send({ joined: !!joined, joinedCount });
+});
+
+app.post('/events/:id/join', async (req, res) => {
+  const id = req.params.id;
+  const email = req.query.email;
+  const eventId = new ObjectId(id);
+
+  // One user = one join: reject duplicates before touching the counters.
+  const existing = await usereventsCollection.findOne({ eventId, userEmail: email });
+  if (existing) {
+    return res.status(409).json({ error: 'already-joined' });
+  }
+
+  await usereventsCollection.insertOne({ eventId, userEmail: email, joinedAt: new Date() });
+  await eventsCollection.updateOne({ _id: eventId }, { $inc: { volunteersNeeded: -1 } });
+
+  res.send({ success: true });
+});
+
+app.delete('/events/:id/join', async (req, res) => {
+  const id = req.params.id;
+  const email = req.query.email;
+  const eventId = new ObjectId(id);
+
+  const result = await usereventsCollection.deleteOne({ eventId, userEmail: email });
+
+  // Only give the spot back if a join actually existed.
+  if (result.deletedCount > 0) {
+    await eventsCollection.updateOne({ _id: eventId }, { $inc: { volunteersNeeded: 1 } });
+  }
+
+  res.send(result);
+});
+
+app.get('/user-events', async (req, res) => {
+  const email = req.query.email;
+  const events = await usereventsCollection.aggregate([
+    { $match: { userEmail: email } },
+    { $sort: { joinedAt: -1 } },
+    { $lookup: { from: 'events', localField: 'eventId', foreignField: '_id', as: 'event' } },
+    { $unwind: '$event' },
+    { $replaceRoot: { newRoot: { $mergeObjects: ['$event', { joinedAt: '$joinedAt' }] } } }
+  ]).toArray();
+  res.send(events);
 });
 
 app.post('/user-events', async (req, res) => {
